@@ -62,11 +62,15 @@ def _kanban_create(
     body_escaped = shlex.quote(body)
     title_escaped = shlex.quote(title)
 
+    # Map string priorities to numeric (higher = more important)
+    priority_map = {"critical": 200, "high": 100, "medium": 50, "low": 10}
+    priority_num = priority_map.get(priority, 50)
+
     cmd = (
-        f"create --title {title_escaped} "
+        f"create {title_escaped} "
         f"--assignee {assignee} "
         f"--body {body_escaped} "
-        f"--priority {priority}"
+        f"--priority {priority_num}"
     )
     if skills:
         for s in skills:
@@ -76,20 +80,20 @@ def _kanban_create(
     if result.returncode != 0:
         return None
 
-    # Parse task ID from output: "Created task abc123"
+    # Parse task ID from output: "Created t_8f7af075  (ready, assignee=...)"
     output = result.stdout + result.stderr
-    match = re.search(r"(?:Created task|task\s+)([a-f0-9]+)", output)
+    match = re.search(r"Created\s+(t_[a-f0-9]+)", output)
     if match:
         return match.group(1)
 
-    # Fallback: try to extract any hex ID
-    match = re.search(r"\b([a-f0-9]{8,})\b", output)
+    # Fallback: try to extract any t_ hex ID
+    match = re.search(r"\b(t_[a-f0-9]+)\b", output)
     return match.group(1) if match else None
 
 
 def _kanban_link(parent_id: str, child_id: str) -> bool:
     """Add dependency link."""
-    result = _kanban(f"link --parent {parent_id} --child {child_id}")
+    result = _kanban(f"link {parent_id} {child_id}")
     return result.returncode == 0
 
 
@@ -105,9 +109,9 @@ def _kanban_show(task_id: str) -> dict[str, Any] | None:
 
     for line in output.split("\n"):
         line = line.strip()
-        if line.lower().startswith("status:"):
+        if line.startswith("status:"):
             info["status"] = line.split(":", 1)[1].strip().lower()
-        elif line.lower().startswith("assignee:"):
+        elif line.startswith("assignee:"):
             info["assignee"] = line.split(":", 1)[1].strip()
 
     return info
