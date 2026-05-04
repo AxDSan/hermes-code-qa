@@ -1,0 +1,31 @@
+name: code-qa
+version: "1.0.0"
+description: "Autonomous multi-agent code review QA pipeline — Tier 1 (lint), Tier 2 (quick single-pass), Tier 3 (5-agent Kanban pipeline). Summon via review_pr, review_diff, review_file tools."
+author: "Abdias J (AxDSan)"
+license: MIT
+homepage: https://github.com/AxDSan/hermes-code-qa
+keywords:
+  - hermes
+  - hermes-plugin
+  - code-review
+  - qa
+  - multi-agent
+  - kanban
+  - security
+  - linting
+requires_env: []
+provides_tools:
+  - review_pr
+  - review_diff
+  - review_file
+  - review_toggle
+provides_hooks:
+  - post_tool_call
+provides_profiles:
+  - security-reviewer
+  - style-reviewer
+  - logic-reviewer
+  - diff-reviewer
+  - consolidator
+dependencies: []
+kind: standalone
