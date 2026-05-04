@@ -19,22 +19,27 @@ git clone https://github.com/AxDSan/hermes-code-qa ~/.hermes/plugins/code-qa
 # Enable it
 hermes plugins enable code-qa
 
-# Create reviewer profiles (first time only)
+# Start a new session (plugin takes effect on next session)
+hermes --skills code-reviewer
+```
+
+**Profiles are already bundled** — the five reviewer profiles (security-reviewer, style-reviewer, logic-reviewer, diff-reviewer, consolidator) are pre-configured with their SOUL.md personas. If you need to create them fresh:
+
+```bash
 hermes profile create security-reviewer --clone
 hermes profile create style-reviewer --clone
 hermes profile create logic-reviewer --clone
 hermes profile create diff-reviewer --clone
 hermes profile create consolidator --clone
 
-# Copy the bundled SOUL.md personas
-cp ~/.hermes/plugins/code-qa/profiles/security-reviewer/SOUL.md ~/.hermes/profiles/security-reviewer/
-cp ~/.hermes/plugins/code-qa/profiles/style-reviewer/SOUL.md ~/.hermes/profiles/style-reviewer/
-cp ~/.hermes/plugins/code-qa/profiles/logic-reviewer/SOUL.md ~/.hermes/profiles/logic-reviewer/
-cp ~/.hermes/plugins/code-qa/profiles/diff-reviewer/SOUL.md ~/.hermes/profiles/diff-reviewer/
-cp ~/.hermes/plugins/code-qa/profiles/consolidator/SOUL.md ~/.hermes/profiles/consolidator/
+# Copy bundled personas
+cp ~/.hermes/plugins/code-qa/profiles/*/SOUL.md ~/.hermes/profiles/*/
+```
 
-# Gateway must be running for Kanban dispatch
-hermes gateway status
+**⚠️ Known issue:** The Kanban dispatcher requires `hermes` on PATH. If you see `spawn_failed` events, ensure the hermes binary is in the gateway's PATH. Verify with:
+```bash
+which hermes                           # Should return a path
+hermes kanban show <task-id>           # Check for spawn_failed events
 ```
 
 ## Usage
