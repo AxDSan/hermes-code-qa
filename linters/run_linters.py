@@ -32,9 +32,9 @@ def get_linter(filepath: str) -> list[str] | None:
     if cmd is None:
         return None
 
-    # Check if command exists
-    which = subprocess.run(["which", cmd[0]], capture_output=True, text=True)
-    if which.returncode != 0:
+    # Check if command exists using Python's shutil (no external which dependency)
+    import shutil as _shutil
+    if _shutil.which(cmd[0]) is None:
         return None
 
     return cmd
