@@ -53,11 +53,12 @@ review_diff(scope="full")        # Tier 3, 5-agent pipeline
 review_diff(scope="instant")     # Tier 1, linters only
 ```
 
-**review_pr** — Review a GitHub pull request
+**review_pr** — Review a GitHub pull request (with auto-triage)
 ```
 review_pr(url="https://github.com/owner/repo/pull/42")
 review_pr(url="...", scope="full", wait=true)
 ```
+*Auto-triage runs first: assigns to maintainer (unless active team), applies labels.*
 
 **review_file** — Review a single file
 ```
@@ -71,6 +72,13 @@ review_toggle(mode="status")     # Show current config
 review_toggle(mode="auto")       # Enable lint-on-save
 review_toggle(mode="off")        # Disable everything
 ```
+
+**triage_issue** — Auto-assign + auto-label a GitHub issue
+```
+triage_issue(url="https://github.com/owner/repo/issues/42")
+```
+*Assigns default maintainer (AxDSan) unless 3+ active contributors exist.
+Applies labels based on title/body keywords (bug, security, docs, etc.).*
 
 ### Summon from chat (natural language):
 - "review PR https://github.com/AxDSan/mnemosyne/pull/22"
@@ -86,9 +94,10 @@ You say "review PR url"
         ▼
 ┌─────────────────┐     ┌──────────────────────────┐
 │  Hermes Session │────▶│  review_pr() tool         │
-│  (you)          │     │  - clones repo            │
-└─────────────────┘     │  - extracts diff           │
-                        │  - creates Kanban tasks    │
+│  (you)          │     │  1. triage (assign+label) │
+└─────────────────┘     │  2. clones repo           │
+                        │  3. extracts diff          │
+                        │  4. creates Kanban tasks    │
                         └─────────┬────────────────┘
                                   │
                     ┌─────────────┼─────────────┐
