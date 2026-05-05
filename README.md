@@ -143,6 +143,34 @@ code_qa:
   tier3_auto_threshold_files: 3    # Min files changed to auto-trigger
   poll_interval_seconds: 30        # How often to check Kanban status
   poll_timeout_seconds: 600        # Max wait for full review
+
+  # ── Triage (auto-assign + auto-label for Issues/PRs) ──
+  triage_enabled: true             # Master switch for all triage
+  triage_assignee: null            # GitHub username. null = auto-detect from gh auth
+  triage_auto_assign: true         # Auto-assign unassigned issues/PRs
+  triage_auto_label: true          # Auto-apply labels based on title/body
+  triage_min_contributors_for_skip: 3   # Skip assign if repo has >= this many contributors
+  triage_min_others_for_skip: 2    # Skip assign if >= this many non-owner humans exist
+  triage_label_map: {}             # Override label keywords. Empty = use built-in defaults
+```
+
+### How config works
+
+**Personal preferences stay local.** `config.yaml` lives in `~/.hermes/` and is never committed to git. When you develop the plugin and push to GitHub, only the generic defaults in `config.py` get shipped. Other users set their own preferences in their own `config.yaml`. No two-way sync needed.
+
+**Triage assignee resolution:** If `triage_assignee` is `null` (the default), the plugin auto-detects your GitHub username from `gh auth status`. You can set it explicitly:
+```yaml
+code_qa:
+  triage_assignee: "your-username"
+```
+
+**Custom label map:** Override or extend the built-in keyword→label mappings:
+```yaml
+code_qa:
+  triage_label_map:
+    bug: ["bug", "priority: high"]
+    hotfix: ["hotfix", "priority: critical"]  # new keyword
+    docs: []  # disable docs auto-labeling
 ```
 
 ## Requirements

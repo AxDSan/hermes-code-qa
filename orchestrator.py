@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config import load_config, get_hermes_home
+from .config import load_config, get_hermes_home, resolve_triage_assignee, resolve_triage_label_map
 
 # ───────────────────────────────────────────────────────────────
 # Constants
@@ -537,31 +537,23 @@ def clone_pr(pr_url: str) -> tuple[str, str] | None:
 # ───────────────────────────────────────────────────────────────
 # Triage: auto-assign + auto-label for Issues and PRs
 # ───────────────────────────────────────────────────────────────
+# All user preferences (assignee, label map, thresholds) are driven
+# by config.yaml, not hardcoded. See config.py for defaults.
 
-TRIAGE_ASSIGNEE = "AxDSan"  # Default assignee
-TRIAGE_LABEL_MAP = {
-    "bug": ["bug", "type: bug"],
-    "fix": ["bug", "type: bug"],
-    "crash": ["bug", "type: bug", "priority: critical"],
-    "security": ["security", "type: security", "priority: critical"],
-    "vulnerability": ["security", "type: security", "priority: critical"],
-    "feature": ["enhancement", "type: feature"],
-    "enhancement": ["enhancement", "type: feature"],
-    "docs": ["documentation", "type: docs"],
-    "documentation": ["documentation", "type: docs"],
-    "readme": ["documentation", "type: docs"],
-    "refactor": ["refactor", "type: chore"],
-    "test": ["testing", "type: test"],
-    "ci": ["ci/cd", "type: ci"],
-    "performance": ["performance", "type: performance"],
-    "slow": ["performance", "type: performance"],
-    "ux": ["ux", "type: ux"],
-    "css": ["ux", "type: ux", "scope: frontend"],
-    "ui": ["ux", "type: ux", "scope: frontend"],
-    "api": ["scope: api"],
-    "dependency": ["dependencies", "type: chore"],
-    "deps": ["dependencies", "type: chore"],
-}
+
+def _get_triage_config() -> dict[str, Any]:
+    """Load and cache triage config. Config reads from local config.yaml
+    which is NEVER committed — your personal preferences stay local."""
+    config = load_config()
+    return {
+        "enabled": config.get("triage_enabled", True),
+        "assignee": resolve_triage_assignee(config),
+        "auto_assign": config.get("triage_auto_assign", True),
+        "auto_label": config.get("triage_auto_label", True),
+        "min_contributors": config.get("triage_min_contributors_for_skip", 3),
+        "min_others": config.get("triage_min_others_for_skip", 2),
+        "label_map": resolve_triage_label_map(config),
+    }
 
 
 def _gh_api(endpoint: str, timeout: int = 15) -> dict[str, Any] | None:
@@ -665,14 +657,26 @@ def triage_assign(
     number: str,
     is_pr: bool = False,
 ) -> dict[str, Any]:
-    """Auto-assign an issue/PR to the default assignee if appropriate.
+    """Auto-assign an issue/PR to the configured assignee if appropriate.
 
-    Rules:
+    Rules (configurable via config.yaml):
+    - triage_enabled=False → skip entirely
+    - triage_auto_assign=False → skip
     - Already assigned → skip
-    - Active team with other contributors → skip (let them handle it)
-    - Solo project or no active contributors → assign TRIAGE_ASSIGNEE
+    - Active team detected → skip (let them handle it)
+    - Otherwise → assign to configured/existing triage_assignee
     """
     result: dict[str, Any] = {"assigned": False, "reason": "no_action_needed"}
+
+    cfg = _get_triage_config()
+    if not cfg["enabled"] or not cfg["auto_assign"]:
+        result["reason"] = "triage_disabled"
+        return result
+
+    assignee = cfg["assignee"]
+    if not assignee:
+        result["reason"] = "no_assignee_configured"
+        return result
 
     current = get_current_assignees(repo_full, number)
     if current:
@@ -686,28 +690,30 @@ def triage_assign(
     # Filter out the owner and bots
     others = [
         c for c in contributors
-        if c != owner and not c.endswith("[bot]") and c != TRIAGE_ASSIGNEE.lower()
+        if c != owner and not c.endswith("[bot]") and c.lower() != assignee.lower()
     ]
 
-    if len(contributors) >= 3 and len(others) >= 2:
-        # Active team: let them triage
+    min_contributors = cfg.get("min_contributors", 3)
+    min_others = cfg.get("min_others", 2)
+
+    if len(contributors) >= min_contributors and len(others) >= min_others:
         result["reason"] = f"active_team_with_{len(others)}_other_contributors"
         return result
 
-    # Assign to default assignee
+    # Assign to configured assignee
     label_arg = "--add-assignee"
     if is_pr:
         success = _gh_run(
-            f"gh pr edit {number} --repo {repo_full} {label_arg} {TRIAGE_ASSIGNEE}"
+            f"gh pr edit {number} --repo {repo_full} {label_arg} {assignee}"
         )
     else:
         success = _gh_run(
-            f"gh issue edit {number} --repo {repo_full} {label_arg} {TRIAGE_ASSIGNEE}"
+            f"gh issue edit {number} --repo {repo_full} {label_arg} {assignee}"
         )
 
     if success:
         result["assigned"] = True
-        result["reason"] = f"assigned_to_{TRIAGE_ASSIGNEE}"
+        result["reason"] = f"assigned_to_{assignee}"
     else:
         result["reason"] = "assign_failed"
 
@@ -725,9 +731,16 @@ def triage_labels(
 
     Analyzes title and body for keywords and applies matching labels.
     Only applies labels that already exist in the repo.
+    Label map is configurable via config.yaml (triage_label_map).
     """
     result: dict[str, Any] = {"labels_added": [], "reason": ""}
 
+    cfg = _get_triage_config()
+    if not cfg["enabled"] or not cfg["auto_label"]:
+        result["reason"] = "triage_disabled"
+        return result
+
+    label_map = cfg["label_map"]
     existing = get_existing_labels(repo_full, number)
     available = get_repo_labels(repo_full)
 
@@ -735,10 +748,9 @@ def triage_labels(
     text = f"{title} {body}".lower()
     matched_labels: set[str] = set()
 
-    for keyword, labels in TRIAGE_LABEL_MAP.items():
+    for keyword, labels in label_map.items():
         if keyword in text:
             for label in labels:
-                # Only add labels that exist in the repo
                 if label in available and label not in existing:
                     matched_labels.add(label)
 
@@ -775,6 +787,17 @@ def triage_issue(
     is_pr: bool = False,
 ) -> dict[str, Any]:
     """Run full triage on an issue or PR: assign + label, then return summary."""
+    cfg = _get_triage_config()
+    if not cfg["enabled"]:
+        return {
+            "repo": repo_full,
+            "number": number,
+            "is_pr": is_pr,
+            "title": title[:200],
+            "assign": {"assigned": False, "reason": "triage_disabled"},
+            "labels": {"labels_added": [], "reason": "triage_disabled"},
+        }
+
     details = get_issue_details(repo_full, number)
     if details:
         title = title or details.get("title", "")

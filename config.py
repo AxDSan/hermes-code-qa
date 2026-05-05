@@ -20,7 +20,77 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "poll_timeout_seconds": 600,
     "review_timeout_seconds": 3600,
     "notify_on_complete": True,
+    # ── Triage (auto-assign + auto-label for Issues/PRs) ──
+    "triage_enabled": True,
+    "triage_assignee": None,           # GitHub username to assign. null = auto-detect from gh auth status
+    "triage_auto_assign": True,        # Auto-assign issues/PRs to triage_assignee
+    "triage_auto_label": True,         # Auto-apply labels based on title/body keywords
+    "triage_min_contributors_for_skip": 3,  # Skip auto-assign if repo has this many contributors
+    "triage_min_others_for_skip": 2,   # Skip auto-assign if this many non-owner humans exist
+    # Override the built-in label map. Empty dict = use built-in defaults.
+    "triage_label_map": {},
+    # Example custom label map:
+    # triage_label_map:
+    #   bug: ["bug", "type: bug"]
+    #   security: ["security", "priority: critical"]
 }
+
+# ── Built-in triage label map (used when triage_label_map config is empty) ──
+
+BUILTIN_TRIAGE_LABEL_MAP: dict[str, list[str]] = {
+    "bug": ["bug", "type: bug"],
+    "fix": ["bug", "type: bug"],
+    "crash": ["bug", "type: bug", "priority: critical"],
+    "security": ["security", "type: security", "priority: critical"],
+    "vulnerability": ["security", "type: security", "priority: critical"],
+    "feature": ["enhancement", "type: feature"],
+    "enhancement": ["enhancement", "type: feature"],
+    "docs": ["documentation", "type: docs"],
+    "documentation": ["documentation", "type: docs"],
+    "readme": ["documentation", "type: docs"],
+    "refactor": ["refactor", "type: chore"],
+    "test": ["testing", "type: test"],
+    "ci": ["ci/cd", "type: ci"],
+    "performance": ["performance", "type: performance"],
+    "slow": ["performance", "type: performance"],
+    "ux": ["ux", "type: ux"],
+    "css": ["ux", "type: ux", "scope: frontend"],
+    "ui": ["ux", "type: ux", "scope: frontend"],
+    "api": ["scope: api"],
+    "dependency": ["dependencies", "type: chore"],
+    "deps": ["dependencies", "type: chore"],
+}
+
+
+def resolve_triage_assignee(config: dict[str, Any]) -> str | None:
+    """Resolve the triage assignee from config, falling back to gh auth status."""
+    assignee = config.get("triage_assignee")
+    if assignee:
+        return assignee
+    # Auto-detect from gh auth
+    try:
+        import subprocess
+        result = subprocess.run(
+            "gh auth status 2>&1 | grep -oP 'Logged in to github\\.com account \\K\\w+'",
+            shell=True, capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def resolve_triage_label_map(config: dict[str, Any]) -> dict[str, list[str]]:
+    """Resolve triage label map: user config overrides built-in defaults."""
+    custom = config.get("triage_label_map") or {}
+    # Empty dict means use built-ins entirely
+    if not custom:
+        return dict(BUILTIN_TRIAGE_LABEL_MAP)
+    # Merge: user entries override built-in entries, plus new ones
+    merged = dict(BUILTIN_TRIAGE_LABEL_MAP)
+    merged.update(custom)
+    return merged
 
 
 def get_hermes_home() -> Path:
