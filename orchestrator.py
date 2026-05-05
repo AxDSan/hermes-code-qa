@@ -532,3 +532,262 @@ def clone_pr(pr_url: str) -> tuple[str, str] | None:
         return clone_path, pr_num
     except Exception:
         return None
+
+
+# ───────────────────────────────────────────────────────────────
+# Triage: auto-assign + auto-label for Issues and PRs
+# ───────────────────────────────────────────────────────────────
+
+TRIAGE_ASSIGNEE = "AxDSan"  # Default assignee
+TRIAGE_LABEL_MAP = {
+    "bug": ["bug", "type: bug"],
+    "fix": ["bug", "type: bug"],
+    "crash": ["bug", "type: bug", "priority: critical"],
+    "security": ["security", "type: security", "priority: critical"],
+    "vulnerability": ["security", "type: security", "priority: critical"],
+    "feature": ["enhancement", "type: feature"],
+    "enhancement": ["enhancement", "type: feature"],
+    "docs": ["documentation", "type: docs"],
+    "documentation": ["documentation", "type: docs"],
+    "readme": ["documentation", "type: docs"],
+    "refactor": ["refactor", "type: chore"],
+    "test": ["testing", "type: test"],
+    "ci": ["ci/cd", "type: ci"],
+    "performance": ["performance", "type: performance"],
+    "slow": ["performance", "type: performance"],
+    "ux": ["ux", "type: ux"],
+    "css": ["ux", "type: ux", "scope: frontend"],
+    "ui": ["ux", "type: ux", "scope: frontend"],
+    "api": ["scope: api"],
+    "dependency": ["dependencies", "type: chore"],
+    "deps": ["dependencies", "type: chore"],
+}
+
+
+def _gh_api(endpoint: str, timeout: int = 15) -> dict[str, Any] | None:
+    """Call gh api and return JSON. Returns None on failure."""
+    try:
+        result = subprocess.run(
+            f"gh api {endpoint} --jq . 2>/dev/null",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        return json.loads(result.stdout)
+    except Exception:
+        return None
+
+
+def _gh_api_list(endpoint: str, timeout: int = 15) -> list[Any] | None:
+    """Call gh api and return JSON list. Returns None on failure."""
+    try:
+        result = subprocess.run(
+            f"gh api {endpoint} --jq . 2>/dev/null",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        data = json.loads(result.stdout)
+        return data if isinstance(data, list) else None
+    except Exception:
+        return None
+
+
+def _gh_run(cmd: str, timeout: int = 15) -> bool:
+    """Run a gh command. Returns True on success."""
+    try:
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=timeout
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _extract_repo_from_url(url: str) -> tuple[str, str] | None:
+    """Extract (owner/repo, number) from GitHub URL. Works for issues and PRs."""
+    match = re.search(r"github\.com/([^/]+/[^/]+)/(?:issues|pull)/(\d+)", url)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def get_issue_details(repo_full: str, number: str) -> dict[str, Any] | None:
+    """Fetch issue or PR details via gh api."""
+    return _gh_api(f"repos/{repo_full}/issues/{number}")
+
+
+def get_existing_labels(repo_full: str, number: str) -> list[str]:
+    """Get current labels on an issue/PR."""
+    data = _gh_api_list(f"repos/{repo_full}/issues/{number}/labels")
+    if not data:
+        return []
+    return [item.get("name", "") for item in data if isinstance(item, dict)]
+
+
+def get_current_assignees(repo_full: str, number: str) -> list[str]:
+    """Get current assignees of an issue/PR."""
+    data = _gh_api_list(f"repos/{repo_full}/issues/{number}/assignees")
+    if not data:
+        return []
+    return [item.get("login", "") for item in data if isinstance(item, dict)]
+
+
+def get_repo_contributors(repo_full: str) -> list[str]:
+    """Get list of active contributors (recent committers)."""
+    # Get contributors sorted by recency
+    data = _gh_api_list(f"repos/{repo_full}/contributors?per_page=10")
+    if not data:
+        return []
+    return [
+        item.get("login", "")
+        for item in data
+        if isinstance(item, dict) and item.get("type") == "User"
+    ]
+
+
+def get_repo_labels(repo_full: str) -> list[str]:
+    """Get all available labels for a repo."""
+    data = _gh_api_list(f"repos/{repo_full}/labels?per_page=100")
+    if not data:
+        return []
+    return [item.get("name", "") for item in data if isinstance(item, dict)]
+
+
+def triage_assign(
+    repo_full: str,
+    number: str,
+    is_pr: bool = False,
+) -> dict[str, Any]:
+    """Auto-assign an issue/PR to the default assignee if appropriate.
+
+    Rules:
+    - Already assigned → skip
+    - Active team with other contributors → skip (let them handle it)
+    - Solo project or no active contributors → assign TRIAGE_ASSIGNEE
+    """
+    result: dict[str, Any] = {"assigned": False, "reason": "no_action_needed"}
+
+    current = get_current_assignees(repo_full, number)
+    if current:
+        result["reason"] = f"already_assigned_to_{','.join(current)}"
+        return result
+
+    # Check if there are other active contributors besides the repo owner
+    contributors = get_repo_contributors(repo_full)
+    owner = repo_full.split("/")[0]
+
+    # Filter out the owner and bots
+    others = [
+        c for c in contributors
+        if c != owner and not c.endswith("[bot]") and c != TRIAGE_ASSIGNEE.lower()
+    ]
+
+    if len(contributors) >= 3 and len(others) >= 2:
+        # Active team: let them triage
+        result["reason"] = f"active_team_with_{len(others)}_other_contributors"
+        return result
+
+    # Assign to default assignee
+    label_arg = "--add-assignee"
+    if is_pr:
+        success = _gh_run(
+            f"gh pr edit {number} --repo {repo_full} {label_arg} {TRIAGE_ASSIGNEE}"
+        )
+    else:
+        success = _gh_run(
+            f"gh issue edit {number} --repo {repo_full} {label_arg} {TRIAGE_ASSIGNEE}"
+        )
+
+    if success:
+        result["assigned"] = True
+        result["reason"] = f"assigned_to_{TRIAGE_ASSIGNEE}"
+    else:
+        result["reason"] = "assign_failed"
+
+    return result
+
+
+def triage_labels(
+    repo_full: str,
+    number: str,
+    title: str = "",
+    body: str = "",
+    is_pr: bool = False,
+) -> dict[str, Any]:
+    """Auto-apply labels based on issue/PR content.
+
+    Analyzes title and body for keywords and applies matching labels.
+    Only applies labels that already exist in the repo.
+    """
+    result: dict[str, Any] = {"labels_added": [], "reason": ""}
+
+    existing = get_existing_labels(repo_full, number)
+    available = get_repo_labels(repo_full)
+
+    # Scan title + body for keyword matches
+    text = f"{title} {body}".lower()
+    matched_labels: set[str] = set()
+
+    for keyword, labels in TRIAGE_LABEL_MAP.items():
+        if keyword in text:
+            for label in labels:
+                # Only add labels that exist in the repo
+                if label in available and label not in existing:
+                    matched_labels.add(label)
+
+    if not matched_labels:
+        result["reason"] = "no_matching_labels"
+        return result
+
+    # Apply labels
+    label_list = ",".join(sorted(matched_labels))
+    label_arg = "--add-label"
+    if is_pr:
+        success = _gh_run(
+            f"gh pr edit {number} --repo {repo_full} {label_arg} \"{label_list}\""
+        )
+    else:
+        success = _gh_run(
+            f"gh issue edit {number} --repo {repo_full} {label_arg} \"{label_list}\""
+        )
+
+    if success:
+        result["labels_added"] = sorted(matched_labels)
+        result["reason"] = f"applied_{len(matched_labels)}_labels"
+    else:
+        result["reason"] = "label_apply_failed"
+
+    return result
+
+
+def triage_issue(
+    repo_full: str,
+    number: str,
+    title: str = "",
+    body: str = "",
+    is_pr: bool = False,
+) -> dict[str, Any]:
+    """Run full triage on an issue or PR: assign + label, then return summary."""
+    details = get_issue_details(repo_full, number)
+    if details:
+        title = title or details.get("title", "")
+        body = body or details.get("body", "") or ""
+
+    assign_result = triage_assign(repo_full, number, is_pr=is_pr)
+    label_result = triage_labels(repo_full, number, title=title, body=body, is_pr=is_pr)
+
+    return {
+        "repo": repo_full,
+        "number": number,
+        "is_pr": is_pr,
+        "title": title[:200],
+        "assign": assign_result,
+        "labels": label_result,
+    }

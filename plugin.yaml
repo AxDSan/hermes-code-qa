@@ -1,6 +1,6 @@
 name: code-qa
-version: "1.0.0"
-description: "Autonomous multi-agent code review QA pipeline — Tier 1 (lint), Tier 2 (quick single-pass), Tier 3 (5-agent Kanban pipeline). Summon via review_pr, review_diff, review_file tools."
+version: "1.1.0"
+description: "Autonomous multi-agent code review QA pipeline — Tier 1 (lint), Tier 2 (quick single-pass), Tier 3 (5-agent Kanban pipeline). Includes GitHub issue/PR triage (auto-assign + auto-label). Summon via review_pr, review_diff, review_file, triage_issue tools."
 author: "Abdias J (AxDSan)"
 license: MIT
 homepage: https://github.com/AxDSan/hermes-code-qa
@@ -19,6 +19,7 @@ provides_tools:
   - review_diff
   - review_file
   - review_toggle
+  - triage_issue
 provides_hooks:
   - post_tool_call
 provides_profiles:

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Abdias J (AxDSan)"
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ def register(ctx: Any) -> dict[str, Any]:
     from .tools.review_diff import SCHEMA as DIFF_SCHEMA, handler as diff_handler
     from .tools.review_file import SCHEMA as FILE_SCHEMA, handler as file_handler
     from .tools.review_toggle import SCHEMA as TOGGLE_SCHEMA, handler as toggle_handler
+    from .tools.triage_issue import SCHEMA as TRIAGE_SCHEMA, handler as triage_handler
 
     ctx.register_tool(
         name="review_pr",
@@ -57,6 +58,12 @@ def register(ctx: Any) -> dict[str, Any]:
         schema=TOGGLE_SCHEMA,
         handler=toggle_handler,
     )
+    ctx.register_tool(
+        name="triage_issue",
+        toolset="code_qa",
+        schema=TRIAGE_SCHEMA,
+        handler=triage_handler,
+    )
 
     # ── Hooks ──
     from .hooks.post_tool_call import on_post_tool_call
@@ -66,13 +73,13 @@ def register(ctx: Any) -> dict[str, Any]:
     # ── Check profiles ──
     _check_profiles()
 
-    logger.info("Code QA plugin v%s registered (4 tools, 1 hook)", __version__)
+    logger.info("Code QA plugin v%s registered (5 tools, 1 hook)", __version__)
 
     return {
         "status": "registered",
         "plugin": "code-qa",
         "version": __version__,
-        "tools": 4,
+        "tools": 5,
         "hooks": 1,
     }
 

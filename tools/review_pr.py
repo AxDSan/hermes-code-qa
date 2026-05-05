@@ -13,12 +13,14 @@ from ..orchestrator import (
     get_changed_files,
     poll_pipeline,
     run_inline_review,
+    triage_issue,
+    _extract_repo_from_url,
 )
 from ..config import load_config
 
 SCHEMA: dict[str, Any] = {
     "name": "review_pr",
-    "description": "Review a GitHub pull request using the Code QA pipeline. For small PRs (<10 files), use scope='quick' for faster results. For large PRs or features, use scope='full' for the complete 5-agent Kanban pipeline.",
+    "description": "Review a GitHub pull request using the Code QA pipeline. Runs auto-triage first (assigns to maintainer unless active team exists, applies labels based on content), then proceeds with review. For small PRs (<10 files), use scope='quick' for faster results. For large PRs or features, use scope='full' for the complete 5-agent Kanban pipeline.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -52,6 +54,16 @@ def handler(args: dict[str, Any], **kwargs) -> str:
     if not url:
         return json.dumps({"success": False, "error": "No PR URL provided."})
 
+    # ── Triage: auto-assign + auto-label ──
+    triage_result = None
+    repo_info = _extract_repo_from_url(url)
+    if repo_info:
+        repo_full, pr_num = repo_info
+        try:
+            triage_result = triage_issue(repo_full, pr_num, is_pr=True)
+        except Exception:
+            pass
+
     # Clone the PR
     clone_result = clone_pr(url)
     if clone_result is None:
@@ -59,6 +71,7 @@ def handler(args: dict[str, Any], **kwargs) -> str:
             {
                 "success": False,
                 "error": f"Failed to clone PR from {url}. Check the URL and ensure the repo is public.",
+                "triage": triage_result,
             }
         )
 
@@ -106,6 +119,7 @@ def handler(args: dict[str, Any], **kwargs) -> str:
                 "pr_url": url,
                 "files_reviewed": len(changed),
                 "review": result_text,
+                "triage": triage_result,
             }
         )
 
@@ -125,6 +139,7 @@ def handler(args: dict[str, Any], **kwargs) -> str:
                 "pipeline": pipeline,
                 "review": review_result["result"],
                 "status": review_result["status"],
+                "triage": triage_result,
             }
         )
     else:
@@ -137,6 +152,7 @@ def handler(args: dict[str, Any], **kwargs) -> str:
                 "pipeline": pipeline,
                 "message": f"Kanban pipeline created. Monitor with: hermes kanban list. "
                 f"Consolidator task: {pipeline['consolidator_task']}",
+                "triage": triage_result,
             }
         )
 
